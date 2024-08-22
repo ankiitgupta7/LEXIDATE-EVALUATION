@@ -1,5 +1,5 @@
 import argparse
-import utils_sel_obj
+import utils_tms
 
 def main():
     # read in arguements
@@ -21,11 +21,11 @@ def main():
     num_reps = int(args.num_reps)
     seed_offset = int(args.seed_offset)
     proportion = float(args.proportion)
-    scheme = 'lexicase'
+    scheme = 'tms5'
 
     task_id_lists = [167104, 167184, 167168, 167161, 189905]
 
-    utils_sel_obj.loop_through_tasks(scheme, task_id_lists, save_dir, num_reps, n_jobs, proportion, seed_offset)
+    utils_tms.loop_through_tasks(scheme, task_id_lists, save_dir, num_reps, n_jobs, proportion, seed_offset)
 
 
 if __name__ == '__main__':

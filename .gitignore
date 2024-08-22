@@ -8,3 +8,5 @@ Experiments/Splits_Complexity/Hpc/30/slurm-*
 Experiments/Splits_Complexity/Hpc/50/slurm-*
 Bookdown/_book
 reviews.md
+*.pkl
+slurm-*

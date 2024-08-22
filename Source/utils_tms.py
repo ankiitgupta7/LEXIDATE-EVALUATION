@@ -54,7 +54,7 @@ def GetEstimatorParams(n_jobs):
         'n_jobs':n_jobs,
         'survival_selector' :None,
         'max_size': 10,
-        'parent_selector': tpot2.selectors.lexicase_selection,
+        'parent_selector': tpot2.selectors.tournament_selection,
 
         # offspring variation params
         'mutate_probability': 0.33,

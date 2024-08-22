@@ -1,3 +1,4 @@
+import argparse
 import openml
 import tpot2
 import sklearn.metrics
@@ -41,6 +42,7 @@ def SamplingComplexity(est,X,y):
     est.fit(X,y)
     return [float(tpot2.objectives.complexity_scorer(est,0,0))]
 
+
 def GetEstimatorParams(n_jobs):
     # return dictionary based on selection scheme we are using
     params = {
@@ -54,7 +56,7 @@ def GetEstimatorParams(n_jobs):
         'n_jobs':n_jobs,
         'survival_selector' :None,
         'max_size': 10,
-        'parent_selector': tpot2.selectors.lexicase_selection,
+        'parent_selector': tpot2.selectors.tournament_selection,
 
         # offspring variation params
         'mutate_probability': 0.33,
@@ -149,107 +151,132 @@ def load_task(task_id, preprocess=True):
 
     return X_train, y_train, X_test, y_test
 
-def loop_through_tasks(scheme, task_id_lists, save_dir, num_reps, n_jobs,proportion, seed_offset):
-    # what scheme are we doing?
+def main():
+    # read in arguements
+    parser = argparse.ArgumentParser()
+    # number of threads to use during estimator evalutation
+    parser.add_argument("-n", "--n_jobs", default=50,  required=False, nargs='?')
+    # where to save the results/models
+    parser.add_argument("-s", "--savepath", default="./", required=False, nargs='?')
+
+    args = parser.parse_args()
+    n_jobs = int(args.n_jobs)
+    save_dir = args.savepath
+
+    # reruns for 50/50 split
+    # tasks = [167168,167161,167185,167185,167185,189905]
+    # seeds = [6140  ,6141  ,6146  ,6143  ,6144  ,6145]
+    # proportion = .5
+
+    # reruns for 70/30 split
+    # tasks = [167184,167185,167185,167104]
+    # seeds = [5840,5841,5842,5843]
+    # proportion = .3
+
+    # reruns for 90/10 split
+    tasks = [167168,189905]
+    seeds = [5540,5541,5542,5543]
+    proportion = .1
+
+    scheme = 'tms5'
+    classification=True
     est_params = GetEstimatorParams(n_jobs)
-    classification = True
-    seed = seed_offset
 
-    for taskid in task_id_lists:
-        for run in range(num_reps):
-            save_folder = f"{save_dir}/{seed}-{taskid}"
-            if not os.path.exists(save_folder):
-                print('CREATING FOLDER:', save_folder)
-                os.makedirs(save_folder)
+    for taskid,seed in zip(tasks,seeds):
+        save_folder = f"{save_dir}/{seed}-{taskid}"
+        if not os.path.exists(save_folder):
+            print('CREATING FOLDER:', save_folder)
+            os.makedirs(save_folder)
+        else:
+            continue
+
+        try:
+
+            est_params.update({'cv': sklearn.model_selection.StratifiedKFold(n_splits=10, shuffle=True, random_state=seed)})
+            print("LOADING DATA")
+            X_train, y_train, X_test, y_test = load_task(taskid, preprocess=True)
+
+            # split data according to traning and testing type
+            selection_portion = proportion
+            if classification:
+                X_learn, X_select, y_learn, y_select = sklearn.model_selection.train_test_split(X_train, y_train, train_size=1.0-selection_portion, test_size=selection_portion, stratify=y_train, random_state=seed)
             else:
-                seed += 1
-                continue
+                X_learn, X_select, y_learn, y_select = sklearn.model_selection.train_test_split(X_train, y_train, train_size=1.0-selection_portion, test_size=selection_portion, random_state=seed)
 
-            print('PROPORTION:',proportion)
+            print('X_learn:',X_learn.shape,'|','y_learn:',y_learn.shape)
+            print('X_select:',X_select.shape,'|','y_select:',y_select.shape)
 
-            try:
+            # create selection objective functions
+            select_objective = partial(SelectionObjectives,X=X_learn,y=y_learn,X_select=X_select,y_select=y_select,classification=classification)
+            select_objective.__name__ = 'sel-obj'
+            est_params.update({'selection_objectives_functions': [select_objective],'selection_objective_functions_weights': [1] * (len(X_select))})
+            est_params.update({'random_state': seed})
 
-                est_params.update({'cv': sklearn.model_selection.StratifiedKFold(n_splits=10, shuffle=True, random_state=seed)})
-                print("LOADING DATA")
-                X_train, y_train, X_test, y_test = load_task(taskid, preprocess=True)
+            # raw accuracy & complexity to filter population in the end
+            select_objective_acc = partial(SelectionObjectivesAccuracy,X=X_learn,y=y_learn,X_select=X_select,y_select=y_select,classification=classification)
+            select_objective_acc.__name__ = 'obj-acc'
+            complexity_metric = partial(SamplingComplexity,X=X_learn,y=y_learn)
+            complexity_metric.__name__ = 'complex'
+            est_params.update({'other_objective_functions': [select_objective_acc,complexity_metric],'other_objective_functions_weights': [2,-1]})
 
-                # split data according to traning and testing type
-                selection_portion = proportion
-                if classification:
-                    X_learn, X_select, y_learn, y_select = sklearn.model_selection.train_test_split(X_train, y_train, train_size=1.0-selection_portion, test_size=selection_portion, stratify=y_train, random_state=seed)
-                else:
-                    X_learn, X_select, y_learn, y_select = sklearn.model_selection.train_test_split(X_train, y_train, train_size=1.0-selection_portion, test_size=selection_portion, random_state=seed)
+            est = tpot2.TPOTEstimator(**est_params)
 
-                print('X_learn:',X_learn.shape,'|','y_learn:',y_learn.shape)
-                print('X_select:',X_select.shape,'|','y_select:',y_select.shape)
+            start = time.time()
+            print("ESTIMATOR FITTING")
+            print('SEED:', seed)
+            est.fit(X_learn, y_learn, X_train, y_train)
+            print("ESTIMATOR FITTING COMPLETE")
+            duration = time.time() - start
 
-                # create selection objective functions
-                select_objective = partial(SelectionObjectives,X=X_learn,y=y_learn,X_select=X_select,y_select=y_select,classification=classification)
-                select_objective.__name__ = 'sel-obj'
-                est_params.update({'selection_objectives_functions': [select_objective],'selection_objective_functions_weights': [1] * (len(X_select))})
-                est_params.update({'random_state': seed})
+            train_score = score(est, X_train, y_train)
+            test_score = score(est, X_test, y_test)
 
-                # raw accuracy & complexity to filter population in the end
-                select_objective_acc = partial(SelectionObjectivesAccuracy,X=X_learn,y=y_learn,X_select=X_select,y_select=y_select,classification=classification)
-                select_objective_acc.__name__ = 'obj-acc'
-                complexity_metric = partial(SamplingComplexity,X=X_learn,y=y_learn)
-                complexity_metric.__name__ = 'complex'
-                est_params.update({'other_objective_functions': [select_objective_acc,complexity_metric],'other_objective_functions_weights': [2,-1]})
-
-                est = tpot2.TPOTEstimator(**est_params)
-
-                start = time.time()
-                print("ESTIMATOR FITTING")
-                print('SEED:', seed)
-                est.fit(X_learn, y_learn, X_train, y_train)
-                print("ESTIMATOR FITTING COMPLETE")
-                duration = time.time() - start
-
-                train_score = score(est, X_train, y_train)
-                test_score = score(est, X_test, y_test)
-
-                all_scores = {}
-                train_score = {f"train_{k}": v for k, v in train_score.items()}
-                all_scores.update(train_score)
-                all_scores.update(test_score)
+            all_scores = {}
+            train_score = {f"train_{k}": v for k, v in train_score.items()}
+            all_scores.update(train_score)
+            all_scores.update(test_score)
 
 
-                all_scores["start"] = start
-                all_scores["taskid"] = taskid
-                all_scores["selection"] = scheme
-                all_scores["duration"] = duration
-                all_scores["seed"] = seed
+            all_scores["start"] = start
+            all_scores["taskid"] = taskid
+            all_scores["selection"] = scheme
+            all_scores["duration"] = duration
+            all_scores["seed"] = seed
 
-                print('SAVING: EVALUATION_INDIVIDUALS.PKL')
-                if type(est) is tpot2.TPOTClassifier or type(est) is tpot2.TPOTEstimator or type(est) is  tpot2.TPOTEstimatorSteadyState:
-                    with open(f"{save_folder}/evaluated_individuals.pkl", "wb") as f:
-                        pickle.dump(est.evaluated_individuals, f)
+            print('SAVING: EVALUATION_INDIVIDUALS.PKL')
+            if type(est) is tpot2.TPOTClassifier or type(est) is tpot2.TPOTEstimator or type(est) is  tpot2.TPOTEstimatorSteadyState:
+                with open(f"{save_folder}/evaluated_individuals.pkl", "wb") as f:
+                    pickle.dump(est.evaluated_individuals, f)
 
-                print('SAVING:FITTED_PIPELINES.PKL')
-                with open(f"{save_folder}/fitted_pipeline.pkl", "wb") as f:
-                    pickle.dump(est.fitted_pipeline_, f)
-
-
-                print('SAVING:SCORES.PKL')
-                with open(f"{save_folder}/scores.pkl", "wb") as f:
-                    pickle.dump(all_scores, f)
-
-                print('SAVING: DATA.CSV')
-                with open(f"{save_folder}/data.pkl", "wb") as f:
-                    pickle.dump(est._evolver_instance.data_df, f)
-
-            except Exception as e:
-                trace =  traceback.format_exc()
-                pipeline_failure_dict = {"taskid": taskid, "selection": scheme, "seed": seed, "error": str(e), "trace": trace}
-                print("failed on ")
-                print(save_folder)
-                print(e)
-                print(trace)
-
-                with open(f"{save_folder}/failed.pkl", "wb") as f:
-                    pickle.dump(pipeline_failure_dict, f)
+            print('SAVING:FITTED_PIPELINES.PKL')
+            with open(f"{save_folder}/fitted_pipeline.pkl", "wb") as f:
+                pickle.dump(est.fitted_pipeline_, f)
 
 
-            seed += 1
+            print('SAVING:SCORES.PKL')
+            with open(f"{save_folder}/scores.pkl", "wb") as f:
+                pickle.dump(all_scores, f)
+
+            print('SAVING: DATA.CSV')
+            with open(f"{save_folder}/data.pkl", "wb") as f:
+                pickle.dump(est._evolver_instance.data_df, f)
+
+        except Exception as e:
+            trace =  traceback.format_exc()
+            pipeline_failure_dict = {"taskid": taskid, "selection": scheme, "seed": seed, "error": str(e), "trace": trace}
+            print("failed on ")
+            print(save_folder)
+            print(e)
+            print(trace)
+
+            with open(f"{save_folder}/failed.pkl", "wb") as f:
+                pickle.dump(pipeline_failure_dict, f)
 
     print("all finished")
+
+
+
+
+if __name__ == '__main__':
+    main()
+    print('END OF MAIN')

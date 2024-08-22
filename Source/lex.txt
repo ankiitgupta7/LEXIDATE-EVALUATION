@@ -1,0 +1,7 @@
+CREATING FOLDER: .//5540-167168
+LOADING DATA
+data/167168_True.pkl
+X_learn: (510, 18) | y_learn: (510,)
+X_select: (57, 18) | y_select: (57,)
+ESTIMATOR FITTING
+SEED: 5540
