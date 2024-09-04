@@ -1,9 +1,8 @@
-[submodule "tpot2-sel-obj"]
-    path = tpot2-sel-obj
-    url = https://github.com/ankiitgupta7/tpot2.git
-    branch = sel-obj
-
-[submodule "tpot2-base"]
-    path = tpot2-base
-    url = https://github.com/ankiitgupta7/tpot2.git
-    branch = base
+[submodule "tpot2-selection-objectives-base"]
+	path = tpot2-selection-objectives-base
+	url = https://github.com/ankiitgupta7/tpot2.git
+	branch = selection-objectives-base
+[submodule "tpot2-selection-objectives"]
+	path = tpot2-selection-objectives
+	url = https://github.com/ankiitgupta7/tpot2.git
+	branch = selection-objectives
